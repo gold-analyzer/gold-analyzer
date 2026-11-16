@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>محلل الذهب والفوركس</title>
+<style>
+:root{--b:#10151c;--c:#1a222d;--l:#2c3847;--t:#e9eef4;--m:#8c9aab;--g:#35d07f;--r:#ff6161;--y:#f2c14e}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:560px;padding:12px;background:var(--b);color:var(--t);font:15px/1.6 Tahoma,system-ui,sans-serif}
+h1{font-size:20px;margin:6px 0 2px}small,.m{color:var(--m)}
+.c{background:var(--c);border-radius:12px;padding:12px;margin:10px 0}
+.row{display:flex;gap:8px;margin:6px 0}
+button,select,input{font:inherit;border-radius:10px;border:1px solid var(--l);background:#222c39;color:var(--t);padding:10px;min-width:0}
+button{flex:1}input,select{width:100%}
+button.on{background:var(--y);color:#15130a;border-color:var(--y);font-weight:700}
+button.go{background:var(--g);color:#08140d;border:0;font-weight:700}
+.k{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--l)}
+.k:last-child{border:0}.up{color:var(--g)}.dn{color:var(--r)}.w{color:var(--y)}
+.big{font-size:22px;font-weight:700;margin:0 0 6px}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--y)}
+</style></head><body>
+<h1>محلل الذهب والفضة والفوركس</h1>
+<small>أسعار حقيقية من Twelve Data. تحليل آلي وليس نصيحة مالية.</small>
+<div class="c">
+<input id="key" type="password" placeholder="مفتاح Twelve Data (يُحفظ على جهازك فقط)">
+<div class="row"><button data-m="swing" class="on">سوينغ يومي</button><button data-m="scalp">سكالب</button></div>
+<div class="row"><button data-k="metals" class="on">معادن</button><button data-k="forex">فوركس</button></div>
+<select id="sym"></select>
+<div class="row"><button class="go" id="an">حلّل الآن</button><button id="nw">الأخبار الاقتصادية</button></div>
+</div>
+<div id="out"></div>
+<script>
+const $=i=>document.getElementById(i);
+const SYM={metals:['XAU/USD','XAG/USD'],forex:['EUR/USD','GBP/USD','USD/JPY','AUD/USD','USD/CAD','USD/CHF','NZD/USD','EUR/JPY','GBP/JPY']};
+const TF={swing:['1day','1week'],scalp:['15min','1h']};
+let mode='swing',mk='metals';const KEY='td_key',cache={};
+try{$('key').value=localStorage.getItem(KEY)||''}catch(e){}
+const sel=(q,b)=>{document.querySelectorAll(q).forEach(x=>x.classList.remove('on'));b.classList.add('on')};
+const fill=()=>$('sym').innerHTML=SYM[mk].map(s=>`<option>${s}</option>`).join('');
+document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{mode=b.dataset.m;sel('[data-m]',b)});
+document.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{mk=b.dataset.k;sel('[data-k]',b);fill()});
+fill();
+const out=h=>$('out').innerHTML=h;
+
+async function get(s,i){
+ const k=$('key').value.trim();if(!k)throw Error('أدخل مفتاح Twelve Data أولاً');
+ try{localStorage.setItem(KEY,k)}catch(e){}
+ const id=s+i;if(cache[id]&&Date.now()-cache[id].t<60000)return cache[id].d;
+ const r=await(await fetch(`https://api.twelvedata.com/time_series?symbol=${s}&interval=${i}&outputsize=300&apikey=${k}`)).json();
+ if(r.status==='error'||!r.values)throw Error(r.message||'فشل جلب البيانات');
+ const d=r.values.slice().reverse().map(v=>({t:v.datetime,o:+v.open,h:+v.high,l:+v.low,c:+v.close}));
+ cache[id]={t:Date.now(),d};return d}
+
+const ema=(a,n)=>{const k=2/(n+1);let e=a[0];return a.map(x=>e=x*k+e*(1-k))};
+const rsi=(c,n=14)=>{let g=0,l=0;return c.map((x,i)=>{if(!i)return 50;const d=x-c[i-1],u=Math.max(d,0),w=Math.max(-d,0);
+ if(i<=n){g+=u/n;l+=w/n}else{g=(g*(n-1)+u)/n;l=(l*(n-1)+w)/n}return l==0?100:100-100/(1+g/l)})};
+const atrA=(c,n=14)=>{let a=0;return c.map((x,i)=>{const tr=i?Math.max(x.h-x.l,Math.abs(x.h-c[i-1].c),Math.abs(x.l-c[i-1].c)):x.h-x.l;
+ return a=i<n?(a*i+tr)/(i+1):(a*(n-1)+tr)/n})};
+const wa=a=>{let s=0,w=0;a.forEach((x,i)=>{s+=x*(i+1);w+=i+1});return w?s/w:NaN};
+
+// منطق السوينغ المقتبس من مؤشر Market Path Forecast
+function swings(c,len=16){let dir=0,hi=null,lo=null,bu=[],be=[];
+ for(let i=len;i<c.length;i++){let H=-1e9,L=1e9;
+  for(let j=i-len+1;j<=i;j++){H=Math.max(H,c[j].h);L=Math.min(L,c[j].l)}
+  const od=dir;if(c[i].h==H){dir=1;hi={p:H,i}}if(c[i].l==L){dir=-1;lo={p:L,i}}
+  if(dir!=od&&od&&hi&&lo){const d=Math.abs(hi.i-lo.i);
+   if(dir<0)bu.push({p:(hi.p-lo.p)/lo.p*100,d});else be.push({p:(hi.p-lo.p)/hi.p*100,d})}}
+ return{dir,hi,lo,bu:bu.slice(-20),be:be.slice(-20)}}
+function piv(c,n=5){const r=[];for(let i=n;i<c.length-n;i++){let h=1,l=1;
+ for(let j=i-n;j<=i+n;j++){if(c[j].h>c[i].h)h=0;if(c[j].l<c[i].l)l=0}
+ if(h)r.push({p:c[i].h,s:'R'});if(l)r.push({p:c[i].l,s:'S'})}return r.slice(-30)}
+
+function core(c){
+ const n=c.length-1,cl=c.map(x=>x.c),px=cl[n],A=atrA(c)[n];
+ const e8=ema(cl,8),e21=ema(cl,21),e50=ema(cl,50),R=rsi(cl),sw=swings(c);
+ if(!sw.hi||!sw.lo)return null;
+ const up=sw.dir>0,s=up?1:-1,ar=up?sw.bu:sw.be;if(ar.length<3)return null;
+ const pct=wa(ar.map(x=>x.p)),dur=wa(ar.map(x=>x.d)),org=up?sw.lo:sw.hi;
+ const raw=org.p*(1+s*pct/100),done=Math.abs(px-org.p)/Math.abs(raw-org.p);
+ const tgt=up?Math.max(raw,px+A*1.5):Math.min(raw,px-A*1.5),base=Math.abs(tgt-px);
+ const t=[.4,.7,1].map(f=>px+s*base*f);
+ const dSL=Math.min(Math.max(Math.abs(px-org.p)+A*.2,A),A*3),sl=px-s*dSL;
+ const f=[s,e21[n]>e50[n]?1:-1,px>e50[n]?1:-1,R[n]>50?1:-1,e8[n]>e21[n]?1:-1];
+ if((up&&R[n]>75)||(!up&&R[n]<25))f[3]=0;
+ const sc=f.reduce((a,b)=>a+b,0),d=sc*s>=3?s:0;
+ return{d,up,px,A,sl,t,pct,dur,done,sw,org,R,e8,e21,e50,sc,f,cl,c,n}}
+
+function bt(c){let w=0,l=0;
+ for(let i=120;i<c.length-25;i+=3){const r=core(c.slice(Math.max(0,i-199),i+1));if(!r||!r.d)continue;let res=0;
+  for(let j=i+1;j<=Math.min(i+40,c.length-1);j++){
+   const sl=r.d>0?c[j].l<=r.sl:c[j].h>=r.sl,tp=r.d>0?c[j].h>=r.t[0]:c[j].l<=r.t[0];
+   if(sl){res=-1;break}if(tp){res=1;break}}
+  if(res>0)w++;if(res<0)l++}
+ return{w,l}}
+
+function reversal(r){const{c,n,up,A,px,R,e8,e21,sw,org,dur,done}=r,s=up?1:-1,o=[];
+ o.push(['اكتمال الموجة (≥90% من المتوسط التاريخي)',done>=.9]);
+ o.push(['مدة الموجة بلغت متوسطها التاريخي',n-org.i>=dur*.9]);
+ o.push(['RSI في منطقة تشبع',up?R[n]>70:R[n]<30]);
+ const ph=Math.max(...c.slice(-5).map(x=>x.h)),pl=Math.min(...c.slice(-5).map(x=>x.l));
+ const oh=Math.max(...c.slice(-30,-10).map(x=>x.h)),ol=Math.min(...c.slice(-30,-10).map(x=>x.l));
+ const rn=Math.max(...R.slice(-5)),ro=Math.max(...R.slice(-30,-10)),rn2=Math.min(...R.slice(-5)),ro2=Math.min(...R.slice(-30,-10));
+ o.push(['دايفرجنس بين السعر وRSI',up?(ph>=oh&&rn<ro-2):(pl<=ol&&rn2>ro2+2)]);
+ const lv=piv(c).filter(x=>up?x.s=='R':x.s=='S');
+ o.push(['السعر قرب دعم/مقاومة تاريخي معاكس',lv.some(x=>Math.abs(x.p-px)<=A*.5)]);
+ const a=c[n],b=c[n-1],body=Math.abs(a.c-a.o)||1e-9,uw=a.h-Math.max(a.o,a.c),lw=Math.min(a.o,a.c)-a.l;
+ const eng=up?(a.c<a.o&&b.c>b.o&&a.c<b.o&&a.o>b.c):(a.c>a.o&&b.c<b.o&&a.c>b.o&&a.o<b.c);
+ const pin=up?uw>2*body&&uw>(a.h-a.l)*.6:lw>2*body&&lw>(a.h-a.l)*.6;
+ o.push(['شمعة انعكاسية (ابتلاع أو بن بار)',eng||pin]);
+ o.push(['تراجع الزخم (تقارب المتوسطات)',Math.abs(e8[n]-e21[n])<Math.abs(e8[n-5]-e21[n-5])*.7]);
+ return o}
+
+function sess(){const h=new Date().getUTCHours();
+ const ov=h>=12&&h<16,ln=h>=7&&h<16,ny=h>=12&&h<21;
+ return{txt:ov?'تداخل لندن ونيويورك (أنشط وقت)':ln?'جلسة لندن':ny?'جلسة نيويورك':'جلسة آسيا (سيولة أقل)',ok:ln||ny}}
+
+async function analyze(){
+ const sym=$('sym').value;out('<div class="c m">جاري جلب الأسعار والتحليل...</div>');
+ try{
+  const[e,t]=await Promise.all([get(sym,TF[mode][0]),get(sym,TF[mode][1])]);
+  const r=core(e);if(!r)return out('<div class="c">بيانات غير كافية لتحليل موثوق الآن.</div>');
+  const tc=t.map(x=>x.c),te21=ema(tc,21).pop(),te50=ema(tc,50).pop(),tp=tc[tc.length-1];
+  const tr=te21>te50&&tp>te50?1:te21<te50&&tp<te50?-1:0,ss=sess();
+  let d=r.d;if(d&&tr&&tr!==d)d=0;
+  const dp=sym.includes('JPY')?3:sym.includes('XAU')?2:sym.includes('XAG')?3:5,F=x=>x.toFixed(dp);
+  const rv=reversal(r),rn=rv.filter(x=>x[1]).length,b=bt(e);
+  const agree=r.f.filter(x=>x===(d||r.up?1:-1)*(r.up?1:-1)||x===r.sw.dir).length;
+  const conf=d?Math.round((r.f.filter(x=>x===d).length+(tr===d?1:0)+(ss.ok?1:0))/7*100):0;
+  const step=sym.includes('XAU')?10:sym.includes('XAG')||sym.includes('JPY')?.5:.005,rd=Math.round(r.px/step)*step;
+  const lv=piv(e),sup=lv.filter(x=>x.s=='S'&&x.p<r.px).map(x=>x.p).sort((a,b)=>b-a)[0],res=lv.filter(x=>x.s=='R'&&x.p>r.px).map(x=>x.p).sort((a,b)=>a-b)[0];
+  const hi=r.sw.hi.p,lo=r.sw.lo.p,fb=[.382,.5,.618].map(f=>`${f*100}% : ${F(hi-(hi-lo)*f)}`).join(' | ');
+  const rr=d?Math.abs(r.t[1]-r.px)/Math.abs(r.px-r.sl):0;
+  const side=d>0?'شراء':'بيع',cls=d>0?'up':'dn';
+  const trTxt=tr>0?'صاعد':tr<0?'هابط':'محايد';
+  out(`<div class="c"><p class="big ${d?cls:'w'}">${d?side+' '+sym:'لا توجد صفقة واضحة الآن'}</p>
+   <div class="k"><span>السعر الحالي</span><b>${F(r.px)}</b></div>
+   ${d?`<div class="k"><span>نقطة الدخول</span><b>${F(r.px)}</b></div>
+   <div class="k"><span>وقف الخسارة</span><b class="dn">${F(r.sl)}</b></div>
+   <div class="k"><span>الهدف 1 / 2 / 3</span><b class="up">${r.t.map(F).join(' / ')}</b></div>
+   <div class="k"><span>نسبة المخاطرة للعائد (للهدف 2)</span><b>1 : ${rr.toFixed(1)}</b></div>
+   <div class="k"><span>درجة توافق المؤشرات</span><b>${conf}%</b></div>`:
+   `<p class="m">${tr&&r.d&&tr!==r.d?'إشارة الفريم الصغير تعاكس اتجاه الفريم الأكبر، والانتظار أفضل.':'المؤشرات غير متوافقة بما يكفي. لا تدخل بدون إشارة.'}</p>`}
+   <div class="k"><span>اختبار تاريخي لنفس القاعدة (الهدف 1 قبل الوقف)</span><b>${b.w+b.l?Math.round(b.w/(b.w+b.l)*100)+'% ('+b.w+' من '+(b.w+b.l)+')':'لا بيانات'}</b></div>
+   <small>درجة التوافق وليست ضماناً، والنسبة التاريخية تخص آخر 300 شمعة فقط.</small></div>
+   <div class="c"><p class="big ${rn>=4?'w':''}">احتمال الانعكاس: ${rn} من 7 (${Math.round(rn/7*100)}%)</p>
+   ${rv.map(x=>`<div class="k"><span>${x[0]}</span><b class="${x[1]?'w':'m'}">${x[1]?'نعم':'لا'}</b></div>`).join('')}</div>
+   <div class="c"><div class="k"><span>اتجاه ${TF[mode][1]}</span><b>${trTxt}</b></div>
+   <div class="k"><span>اتجاه السوينغ الحالي</span><b>${r.up?'صاعد':'هابط'}</b></div>
+   <div class="k"><span>RSI</span><b>${r.R[r.n].toFixed(1)}</b></div>
+   <div class="k"><span>أقرب دعم / مقاومة</span><b>${sup?F(sup):'-'} / ${res?F(res):'-'}</b></div>
+   <div class="k"><span>فيبوناتشي (ارتداد)</span><b style="font-size:12px">${fb}</b></div>
+   <div class="k"><span>أقرب رقم نفسي</span><b>${F(rd)}</b></div>
+   <div class="k"><span>الجلسة الحالية</span><b>${ss.txt}</b></div></div>`);
+ }catch(x){out(`<div class="c dn">${x.message}</div>`)}}
+
+async function news(){
+ out('<div class="c m">جاري جلب الأخبار...</div>');
+ try{
+  const r=await(await fetch('https://nfs.faireconomy.media/ff_calendar_thisweek.json')).json();
+  const cur=['USD','EUR','GBP','JPY','AUD','CAD','CHF','NZD'],now=Date.now();
+  const ev=r.filter(e=>e.impact==='High'&&cur.includes(e.country)&&new Date(e.date)>now-36e5).slice(0,25);
+  out(`<div class="c"><p class="big">أخبار عالية التأثير هذا الأسبوع</p>${ev.length?ev.map(e=>
+   `<div class="k"><span>${e.country} ${e.title}</span><b class="w" style="font-size:12px">${new Date(e.date).toLocaleString('ar',{weekday:'short',hour:'2-digit',minute:'2-digit'})}</b></div>`).join(''):'<p class="m">لا أخبار قوية متبقية.</p>'}
+   <small>تجنّب الدخول قبل الأخبار القوية بنصف ساعة.</small></div>`);
+ }catch(x){out(`<div class="c"><p>تعذّر جلب التقويم تلقائياً. افتحه مباشرة:</p>
+  <a class="w" href="https://www.forexfactory.com/calendar" target="_blank" rel="noopener">Forex Factory</a><br>
+  <a class="w" href="https://www.investing.com/economic-calendar/" target="_blank" rel="noopener">Investing.com</a></div>`)}}
+$('an').onclick=analyze;$('nw').onclick=news;
+</script></body></html>
